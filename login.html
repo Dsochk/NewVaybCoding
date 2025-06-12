@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login</title>
+    <style>
+        /* Стили для всей страницы */
+        body {
+           font-family: Arial, sans-serif;
+            background-image: url('https://images.unsplash.com/photo-1506748686214-e9df14d4d9d0?ixlib=rb-4.0.3&auto=format&fit=crop&w=1350&q=80'); /* Фоновое изображение */
+            background-size: cover;
+            background-position: center;
+            background-attachment: fixed;
+            margin: 0;
+            padding: 20px;
+            color: #333;
+        }
+
+        /* Стили для контейнера формы */
+        .login-container {
+            max-width: 400px;
+            margin: 0 auto;
+            background-color: rgba(255, 255, 255, 0.85); /* Полупрозрачный белый фон */
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        /* Стили для заголовка */
+        h1 {
+            text-align: center;
+            color: #333;
+        }
+
+        /* Стили для полей ввода */
+        input[type="text"], input[type="password"] {
+            width: 100%;
+            padding: 10px;
+            margin: 10px 0;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+
+        /* Стили для кнопки */
+        button {
+            width: 100%;
+            padding: 10px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+
+        button:hover {
+            background-color: #45a049;
+        }
+
+        /* Стили для сообщений об ошибках */
+        .error {
+            color: red;
+            text-align: center;
+        }
+
+        /* Стили для значка просмотра пароля */
+        .password-wrapper {
+            position: relative;
+        }
+
+        .password-wrapper input {
+            padding-right: 30px; /* Место для значка */
+        }
+
+        .password-wrapper .toggle-password {
+            position: absolute;
+            right: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            cursor: pointer;
+            user-select: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <h1>Login</h1>
+        <form id="login-form">
+            <input type="text" id="login-input" placeholder="Login" required>
+            <div class="password-wrapper">
+                <input type="password" id="password-input" placeholder="Password" required>
+                <span class="toggle-password">👁️</span>
+            </div>
+            <button type="submit">Login</button>
+        </form>
+        <div class="error" id="error-message"></div>
+    </div>
+    <script>
+        const passwordInput = document.getElementById('password-input');
+        const togglePassword = document.querySelector('.toggle-password');
+
+        togglePassword.addEventListener('mousedown', () => {
+            passwordInput.type = 'text';
+        });
+
+        togglePassword.addEventListener('mouseup', () => {
+            passwordInput.type = 'password';
+        });
+
+        // Также обрабатываем случай, если пользователь убирает курсор с значка
+        togglePassword.addEventListener('mouseleave', () => {
+            passwordInput.type = 'password';
+        });
+
+        document.getElementById('login-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const login = document.getElementById('login-input').value;
+            const password = document.getElementById('password-input').value;
+            try {
+                const response = await fetch('/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ login, password })
+                });
+                const result = await response.json();
+                if (result.success) {
+                    window.location.href = '/';
+                } else {
+                    document.getElementById('error-message').textContent = 'Неверный логин или пароль';
+                }
+            } catch (error) {
+                console.error('Ошибка:', error);
+                document.getElementById('error-message').textContent = 'Ошибка при авторизации';
+            }
+        });
+    </script>
+</body>
+</html>

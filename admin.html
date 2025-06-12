@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Panel</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f4f4;
+            color: #333;
+            margin: 0;
+            padding: 20px;
+        }
+        h1, h2 {
+            color: #007bff;
+        }
+        a {
+            color: #007bff;
+            text-decoration: none;
+        }
+        a:hover {
+            text-decoration: underline;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+        }
+        th, td {
+            padding: 10px;
+            border: 1px solid #ddd;
+            text-align: left;
+        }
+        th {
+            background-color: #f8f9fa;
+            font-weight: bold;
+        }
+        form label {
+            display: block;
+            margin-top: 10px;
+        }
+        form input[type="text"], form input[type="password"] {
+            width: 100%;
+            padding: 8px;
+            margin-top: 5px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        form input[type="checkbox"] {
+            margin-right: 5px;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            padding: 10px 15px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+        }
+        .modal-content {
+            background-color: white;
+            margin: 15% auto;
+            padding: 20px;
+            border: 1px solid #888;
+            width: 300px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        }
+        #cancelEdit {
+            background-color: #6c757d;
+        }
+        #cancelEdit:hover {
+            background-color: #5a6268;
+        }
+        .edit-btn {
+            background-color: #007bff;
+            color: white;
+            padding: 5px 10px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .edit-btn:hover {
+            background-color: #0056b3;
+        }
+        .delete-btn {
+            background-color: #dc3545;
+            color: white;
+            padding: 5px 10px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .delete-btn:hover {
+            background-color: #c82333;
+        }
+    </style>
+</head>
+<body>
+    <h1>Admin Panel</h1>
+    <a href="/">Back to To-Do List</a>
+    <h2>Users</h2>
+    <table>
+        <tr>
+            <th>ID</th>
+            <th>Login</th>
+            <th>Password</th>
+            <th>Is Admin</th>
+            <th>Actions</th>
+        </tr>
+        {{userRows}}
+    </table>
+    <h2>Add New User</h2>
+    <form id="addUserForm">
+        <label for="login">Login:</label>
+        <input type="text" id="login" required>
+        <label for="password">Password:</label>
+        <input type="password" id="password" required>
+        <label><input type="checkbox" id="isAdmin"> Is Admin</label>
+        <button type="submit">Add User</button>
+    </form>
+
+    <div id="editModal" class="modal">
+        <div class="modal-content">
+            <h2>Edit User</h2>
+            <form id="editUserForm">
+                <input type="hidden" id="editId">
+                <label for="editLogin">Login:</label>
+                <input type="text" id="editLogin" required>
+                <label for="editPassword">Password:</label>
+                <input type="text" id="editPassword" required>
+                <label>Is Admin:</label>
+                <label><input type="radio" name="editIsAdmin" value="admin"> Да</label>
+                <label><input type="radio" name="editIsAdmin" value="user"> Нет</label>
+                <button type="submit">OK</button>
+                <button type="button" id="cancelEdit">Cancel</button>
+            </form>
+        </div>
+    </div>
+
+   <script>
+        // Функция для переключения видимости пароля
+        function togglePasswordVisibility(input, button) {
+            button.addEventListener('mousedown', () => {
+                input.type = 'text';
+            });
+            button.addEventListener('mouseup', () => {
+                input.type = 'password';
+            });
+            button.addEventListener('mouseleave', () => {
+                input.type = 'password';
+            });
+        }
+
+        // Применяем переключение ко всем ячейкам пароля
+        document.addEventListener('DOMContentLoaded', () => {
+            document.querySelectorAll('.password-cell').forEach(cell => {
+                const input = cell.querySelector('input');
+                const button = cell.querySelector('.show-password-btn');
+                togglePasswordVisibility(input, button);
+            });
+        });
+
+        // Обработчик для добавления пользователя
+        document.getElementById('addUserForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const login = document.getElementById('login').value;
+            const password = document.getElementById('password').value;
+            const isAdmin = document.getElementById('isAdmin').checked ? 'on' : 'off';
+            try {
+                const response = await fetch('/addUser', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ login, password, isAdmin })
+                });
+                const result = await response.json();
+                if (result.success) {
+                    location.reload();
+                } else {
+                    alert('Ошибка: ' + result.error);
+                }
+            } catch (err) {
+                alert('Ошибка: ' + err.message);
+            }
+        });
+
+        // Обработчик для удаления пользователя
+       const editModal = document.getElementById('editModal');
+        document.querySelectorAll('.edit-btn').forEach(button => {
+            button.addEventListener('click', async () => {
+                const id = button.getAttribute('data-id');
+                try {
+                    const response = await fetch('/getPassword', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ id })
+                    });
+                    const result = await response.json();
+                    if (result.success) {
+                        document.getElementById('editId').value = id;
+                        document.getElementById('editLogin').value = button.parentElement.parentElement.children[1].textContent;
+                        document.getElementById('editPassword').value = result.password;
+                        const isAdmin = button.parentElement.parentElement.children[3].textContent === 'Да';
+                        document.querySelector('input[name="editIsAdmin"][value="admin"]').checked = isAdmin;
+                        document.querySelector('input[name="editIsAdmin"][value="user"]').checked = !isAdmin;
+                        editModal.style.display = 'block';
+                    } else {
+                        alert('Ошибка: ' + result.error);
+                    }
+                } catch (err) {
+                    alert('Ошибка: ' + err.message);
+                }
+            });
+        });
+
+        document.getElementById('editUserForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const id = document.getElementById('editId').value;
+            const login = document.getElementById('editLogin').value;
+            const password = document.getElementById('editPassword').value;
+            const isAdmin = document.querySelector('input[name="editIsAdmin"]:checked').value === 'admin' ? 'on' : 'off';
+            try {
+                const response = await fetch('/editUser', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id, login, password, isAdmin })
+                });
+                const result = await response.json();
+                if (result.success) {
+                    location.reload();
+                } else {
+                    alert('Ошибка: ' + result.error);
+                }
+            } catch (err) {
+                alert('Ошибка: ' + err.message);
+            }
+        });
+
+        document.getElementById('cancelEdit').addEventListener('click', () => {
+            editModal.style.display = 'none';
+        });
+    </script>
+    </script>
+</body>
+</html>

@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>To-Do List</title>
+     <!-- Подключаем jQuery -->
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <!-- Подключаем клиентский скрипт -->
+    <script src="/client.js" defer></script>
+    <style>
+        /* Общие стили для страницы */
+        body {
+            font-family: Arial, sans-serif;
+            background-image: url('https://images.unsplash.com/photo-1506748686214-e9df14d4d9d0?ixlib=rb-4.0.3&auto=format&fit=crop&w=1350&q=80'); /* Красивое фоновое изображение */
+            background-size: cover;
+            background-position: center;
+            background-attachment: fixed;
+            margin: 0;
+            padding: 20px;
+            color: #333;
+        }
+
+        /* Контейнер для содержимого */
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background-color: rgba(255, 255, 255, 0.85); /* Полупрозрачный белый фон */
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        /* Стили для заголовка */
+        h1 {
+            text-align: center;
+            color: #4CAF50;
+        }
+
+        /* Стили для таблицы */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+        }
+
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+
+        th {
+            background-color: #f2f2f2;
+            color: #333;
+        }
+
+        tr:hover {
+            background-color: #f5f5f5;
+        }
+
+        /* Стили для кнопок */
+        button {
+            padding: 6px 12px;
+            margin: 0 5px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .edit-btn {
+            background-color: #2196F3;
+            color: white;
+        }
+
+        .delete-btn {
+            background-color: #f44336;
+            color: white;
+        }
+
+        button:hover {
+            opacity: 0.8;
+        }
+
+        /* Стили для формы */
+        form {
+            display: flex;
+            justify-content: center;
+            margin-top: 20px;
+        }
+
+        input[type="text"] {
+            width: 70%;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            margin-right: 10px;
+        }
+
+        button[type="submit"] {
+            padding: 10px 20px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        button[type="submit"]:hover {
+            background-color: #45a049;
+        }
+
+        /* Адаптивность */
+        @media (max-width: 600px) {
+            table, form {
+                width: 100%;
+            }
+
+            input[type="text"] {
+                width: 60%;
+            }
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+   <h1>To-Do List</h1>
+   {{adminButton}}
+    <button id="logout-btn">Log Out</button>
+    <table border="1">
+        <tr>
+            <th>Номер</th>
+            <th>Order Index</th>
+            <th>Text</th>
+            <th>Action</th>
+        </tr>
+        {{rows}}
+    </table>
+    <br>
+    <input type="text" id="new-item" placeholder="Add new item">
+    <button id="add-btn" onclick="addItem()">Add</button>
+</div>
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script>
+        async function addItem() {
+            const text = document.getElementById('new-item').value;
+            if (!text) return;
+            try {
+                const response = await fetch('/add', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text })
+                });
+                const data = await response.json();
+                if (data.success) {
+                    location.reload();
+                } else {
+                    alert('Ошибка: ' + data.error);
+                }
+            } catch (error) {
+                console.error('Ошибка:', error);
+            }
+        }
+
+        async function logout() {
+            await fetch('/logout', { method: 'POST' });
+            window.location.href = '/login';
+        }
+
+        document.querySelectorAll('.edit-btn').forEach(button => {
+                button.addEventListener('click', async () => {
+                    const id = button.getAttribute('data-id');
+                    try {
+                        const response = await fetch(`/getItem?id=${id}`, {
+                            method: 'GET',
+                            headers: { 'Content-Type': 'application/json' }
+                        });
+                        const data = await response.json();
+                        if (data.success) {
+                            const currentText = data.item.text;
+                            const currentOrder = data.item.order_index;
+                            const newText = prompt(`Enter new text (current: "${currentText}")`, currentText);
+                            const newOrder = prompt(`Изменить порядок (current: ${currentOrder})`, currentOrder);
+                            if (newText && newOrder !== null) {
+                                await fetch('/edit', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ id, text: newText, orderIndex: newOrder })
+                                });
+                                location.reload();
+                            }
+                        } else {
+                            alert('Ошибка: ' + data.error);
+                        }
+                    } catch (error) {
+                        console.error('Ошибка:', error);
+                    }
+                });
+            
+
+            document.querySelectorAll('.delete-btn').forEach(button => {
+                button.addEventListener('click', async () => {
+                    const id = button.getAttribute('data-id');
+                    try {
+                        const response = await fetch('/delete', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ id })
+                        });
+                        const data = await response.json();
+                        if (data.success) {
+                            location.reload();
+                        } else {
+                            alert('Ошибка: ' + data.error);
+                        }
+                    } catch (error) {
+                        console.error('Ошибка:', error);
+                    }
+                });
+            });
+
+            document.querySelectorAll('.move-up-btn').forEach(button => {
+                button.addEventListener('click', async () => {
+                    const id = button.getAttribute('data-id');
+                    const currentRow = button.closest('tr');
+                    const prevRow = currentRow.previousElementSibling;
+                    if (prevRow) {
+                        const newOrderIndex = parseInt(prevRow.querySelector('td:nth-child(2)').textContent) - 1;
+                        await reorderItem(id, newOrderIndex);
+                    }
+                });
+            });
+
+            document.querySelectorAll('.move-down-btn').forEach(button => {
+                button.addEventListener('click', async () => {
+                    const id = button.getAttribute('data-id');
+                    const currentRow = button.closest('tr');
+                    const nextRow = currentRow.nextElementSibling;
+                    if (nextRow) {
+                        const newOrderIndex = parseInt(nextRow.querySelector('td:nth-child(2)').textContent);
+                        await reorderItem(id, newOrderIndex);
+                    }
+                });
+            });
+
+            async function reorderItem(id, newOrderIndex) {
+                try {
+                    const response = await fetch('/reorder', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ id, newOrderIndex })
+                    });
+                    const data = await response.json();
+                    if (data.success) {
+                        location.reload();
+                    } else {
+                        alert('Ошибка: ' + data.error);
+                    }
+                } catch (error) {
+                    console.error('Ошибка:', error);
+                }
+            }
+        });
+         document.querySelectorAll('.edit-btn').forEach(button => {
+            button.addEventListener('click', () => {
+                const id = button.getAttribute('data-id');
+                editItem(id);
+            });
+        });
+
+        document.querySelectorAll('.delete-btn').forEach(button => {
+            button.addEventListener('click', () => {
+                const id = button.getAttribute('data-id');
+                deleteItem(id);
+            });
+        });
+
+
+  document.querySelectorAll('.move-up-btn').forEach(button => {
+            button.addEventListener('click', async () => {
+                const id = button.getAttribute('data-id');
+                try {
+                    const response = await fetch('/moveUp', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ id })
+                    });
+                    if (response.ok) {
+                        location.reload(); // Перезагрузка страницы для обновления списка
+                    } else {
+                        console.error('Ошибка при перемещении вверх');
+                    }
+                } catch (error) {
+                    console.error('Ошибка:', error);
+                }
+            });
+        });
+
+        document.querySelectorAll('.move-down-btn').forEach(button => {
+            button.addEventListener('click', async () => {
+                const id = button.getAttribute('data-id');
+                try {
+                    const response = await fetch('/moveDown', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ id })
+                    });
+                    if (response.ok) {
+                        location.reload();
+                    } else {
+                        console.error('Ошибка при перемещении вниз');
+                    }
+                } catch (error) {
+                    console.error('Ошибка:', error);
+                }
+            });
+        });
+
+        document.getElementById('addForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const text = document.getElementById('newItem').value;
+            try {
+                const response = await fetch('/add', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text })
+                });
+                if (response.ok) {
+                    location.reload();
+                } else {
+                    console.error('Ошибка при добавлении');
+                }
+            } catch (error) {
+                console.error('Ошибка:', error);
+            }
+        });
+async function reorderItem(id, newOrderIndex) {
+    try {
+        const response = await fetch('/reorder', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id, newOrderIndex })
+        });
+        const data = await response.json();
+        if (data.success) {
+            location.reload();
+        } else {
+            alert('Ошибка: ' + data.error);
+        }
+    } catch (error) {
+        console.error('Ошибка:', error);
+    }
+}
+    let isMoving = false;
+  document.querySelectorAll('.move-up-btn').forEach(button => {
+        button.addEventListener('click', async () => {
+            if (isMoving) return; // Если уже идёт перемещение, игнорируем клик
+            isMoving = true;
+            const id = button.getAttribute('data-id');
+            try {
+                const response = await fetch('/moveUp', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id })
+                });
+                if (response.ok) {
+                    location.reload();
+                } else {
+                    console.error('Ошибка при перемещении вверх');
+                }
+            } catch (error) {
+                console.error('Ошибка:', error);
+            } finally {
+                isMoving = false; // Сбрасываем флаг после завершения
+            }
+        });
+    });
+
+    document.querySelectorAll('.move-down-btn').forEach(button => {
+        button.addEventListener('click', async () => {
+            if (isMoving) return; // Если уже идёт перемещение, игнорируем клик
+            isMoving = true;
+            const id = button.getAttribute('data-id');
+            try {
+                const response = await fetch('/moveDown', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id })
+                });
+                if (response.ok) {
+                    location.reload();
+                } else {
+                    console.error('Ошибка при перемещении вниз');
+                }
+            } catch (error) {
+                console.error('Ошибка:', error);
+            } finally {
+                isMoving = false; // Сбрасываем флаг после завершения
+            }
+        });
+    });
+    </script>
+</html>
