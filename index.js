@@ -5,6 +5,7 @@ const mysql = require('mysql2/promise');
 const cookieSession = require('cookie-session');
 const crypto = require('crypto');
 const PORT = process.env.PORT || 3000;
+
 const dbConfig = {
     host: process.env.DB_HOST,
     user: process.env.DB_USER,
@@ -13,19 +14,24 @@ const dbConfig = {
 };
 const pool = mysql.createPool(dbConfig);
 
+// Настройка сессий с поддержкой HTTPS в продакшене
 const session = cookieSession({
     name: 'session',
-    keys: ['my_secret_key'],
-    maxAge: 24 * 60 * 60 * 1000,
-    secure: process.env.NODE_ENV === 'production', // Включает secure в продакшене
-    sameSite: 'lax' // Защита от CSRF
+    keys: [process.env.SESSION_KEY || 'my_secret_key'],
+    maxAge: 24 * 60 * 60 * 1000, // 24 часа
+    secure: process.env.NODE_ENV === 'production', // Secure для HTTPS
+    sameSite: 'lax', // Защита от CSRF
+    httpOnly: true // Защита от XSS
 });
+
+// Проверка аутентификации через сессию
 function isAuthenticated(req) {
     return req.session && req.session.userId;
 }
 
+// Проверка аутентификации через сессию или токен
 async function isAuthenticatedOrToken(req) {
-    if (req.session && req.session.userId) {
+    if (isAuthenticated(req)) {
         return true;
     }
     const authHeader = req.headers['authorization'];
@@ -33,10 +39,7 @@ async function isAuthenticatedOrToken(req) {
         const token = authHeader.substring(7);
         try {
             const connection = await mysql.createConnection(dbConfig);
-            const [rows] = await connection.execute(
-                'SELECT id FROM users WHERE token = ?',
-                [token]
-            );
+            const [rows] = await connection.execute('SELECT id FROM users WHERE token = ?', [token]);
             await connection.end();
             return rows.length > 0;
         } catch (error) {
@@ -47,6 +50,7 @@ async function isAuthenticatedOrToken(req) {
     return false;
 }
 
+// Выполнение операций с повторными попытками при дедлоках
 async function executeWithRetry(operation, maxRetries = 3) {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
@@ -62,20 +66,20 @@ async function executeWithRetry(operation, maxRetries = 3) {
     }
 }
 
+// Получение задач пользователя
 async function retrieveListItems(userId) {
-    try {
-        const connection = await mysql.createConnection(dbConfig);
-        const query = 'SELECT id, text, order_index FROM items WHERE user_id = ? ORDER BY order_index';
-        const [rows] = await connection.execute(query, [userId]);
-            console.log(`Items for user ${userId}:`, rows.map(item => ({id: item.id, order_index: item.order_index})));
-        await connection.end();
-        return rows;
-    } catch (error) {
-        console.error('Error retrieving list items:', error);
-        throw error;
+    if (!userId) {
+        throw new Error('userId is required');
     }
+    console.log(`Retrieving items for userId: ${userId}`);
+    const connection = await mysql.createConnection(dbConfig);
+    const query = 'SELECT id, text, order_index FROM items WHERE user_id = ? ORDER BY order_index';
+    const [rows] = await connection.execute(query, [userId]);
+    await connection.end();
+    return rows;
 }
 
+// Получение userId из сессии или токена
 async function getUserIdFromRequest(req) {
     if (req.session && req.session.userId) {
         return req.session.userId;
@@ -84,10 +88,7 @@ async function getUserIdFromRequest(req) {
     if (authHeader && authHeader.startsWith('Bearer ')) {
         const token = authHeader.substring(7);
         const connection = await mysql.createConnection(dbConfig);
-        const [rows] = await connection.execute(
-            'SELECT id FROM users WHERE token = ?',
-            [token]
-        );
+        const [rows] = await connection.execute('SELECT id FROM users WHERE token = ?', [token]);
         await connection.end();
         if (rows.length > 0) {
             return rows[0].id;
@@ -96,6 +97,7 @@ async function getUserIdFromRequest(req) {
     throw new Error('Неавторизованный доступ');
 }
 
+// Генерация HTML строк для задач
 async function getHtmlRows(userId) {
     const todoItems = await retrieveListItems(userId);
     return todoItems.map((item, index) => `
@@ -113,19 +115,14 @@ async function getHtmlRows(userId) {
     `).join('');
 }
 
+// Перестройка order_index
 async function rebuildOrderIndex(userId) {
     let connection;
     try {
         connection = await mysql.createConnection(dbConfig);
-        const [items] = await connection.execute(
-            'SELECT id FROM items WHERE user_id = ? ORDER BY order_index',
-            [userId]
-        );
+        const [items] = await connection.execute('SELECT id FROM items WHERE user_id = ? ORDER BY order_index', [userId]);
         for (let i = 0; i < items.length; i++) {
-            await connection.execute(
-                'UPDATE items SET order_index = ? WHERE id = ?',
-                [i + 1, items[i].id]
-            );
+            await connection.execute('UPDATE items SET order_index = ? WHERE id = ?', [i + 1, items[i].id]);
         }
     } catch (error) {
         console.error('Error rebuilding order index:', error);
@@ -135,12 +132,12 @@ async function rebuildOrderIndex(userId) {
     }
 }
 
+// Обработчик запросов
 async function handleRequest(req, res) {
     session(req, res, async () => {
         if (req.url === '/login' && req.method === 'GET') {
             try {
                 const html = await fs.promises.readFile(path.join(__dirname, 'login.html'), 'utf8');
-                console.log(`Logged in user: ${login}, id: ${rows[0].id}, role: ${rows[0].role}`);
                 res.writeHead(200, { 'Content-Type': 'text/html' });
                 res.end(html);
             } catch (err) {
@@ -154,16 +151,11 @@ async function handleRequest(req, res) {
                 try {
                     const { login, password } = JSON.parse(body);
                     const connection = await mysql.createConnection(dbConfig);
-                    const [rows] = await connection.execute(
-                        'SELECT id, role FROM users WHERE login = ? AND password = ?', 
-                        [login, password]
-                    );
+                    const [rows] = await connection.execute('SELECT id, role FROM users WHERE login = ? AND password = ?', [login, password]);
                     if (rows.length > 0) {
                         const token = crypto.randomBytes(32).toString('hex');
-                        await connection.execute(
-                            'UPDATE users SET token = ? WHERE id = ?',
-                            [token, rows[0].id]
-                        );
+                        await connection.execute('UPDATE users SET token = ? WHERE id = ?', [token, rows[0].id]);
+                        console.log(`Logged in user: ${login}, id: ${rows[0].id}, role: ${rows[0].role}`);
                         req.session.userId = rows[0].id;
                         req.session.role = rows[0].role;
                         await connection.end();
@@ -387,10 +379,7 @@ async function handleRequest(req, res) {
             try {
                 const userId = req.session.userId;
                 const connection = await mysql.createConnection(dbConfig);
-                const [rows] = await connection.execute(
-                    'SELECT text, order_index FROM items WHERE id = ? AND user_id = ?',
-                    [id, userId]
-                );
+                const [rows] = await connection.execute('SELECT text, order_index FROM items WHERE id = ? AND user_id = ?', [id, userId]);
                 await connection.end();
                 if (rows.length > 0) {
                     res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -456,10 +445,7 @@ async function handleRequest(req, res) {
                 const token = authHeader.substring(7);
                 try {
                     const connection = await mysql.createConnection(dbConfig);
-                    const [rows] = await connection.execute(
-                        'SELECT id FROM users WHERE token = ?',
-                        [token]
-                    );
+                    const [rows] = await connection.execute('SELECT id FROM users WHERE token = ?', [token]);
                     if (rows.length > 0) {
                         const userId = rows[0].id;
                         const items = await retrieveListItems(userId);
@@ -528,6 +514,7 @@ async function handleRequest(req, res) {
     });
 }
 
+// Добавление задачи
 async function addItem(text, userId) {
     try {
         const connection = await mysql.createConnection(dbConfig);
@@ -542,31 +529,20 @@ async function addItem(text, userId) {
     }
 }
 
+// Изменение порядка задач
 async function reorderItem(id, newOrderIndex, userId) {
     try {
         const connection = await mysql.createConnection(dbConfig);
-        const [currentItem] = await connection.execute(
-            'SELECT order_index FROM items WHERE id = ? AND user_id = ?',
-            [id, userId]
-        );
+        const [currentItem] = await connection.execute('SELECT order_index FROM items WHERE id = ? AND user_id = ?', [id, userId]);
         if (currentItem.length === 0) throw new Error('Задача не найдена');
         const currentOrderIndex = currentItem[0].order_index;
 
         if (newOrderIndex > currentOrderIndex) {
-            await connection.execute(
-                'UPDATE items SET order_index = order_index - 1 WHERE user_id = ? AND order_index > ? AND order_index <= ?',
-                [userId, currentOrderIndex, newOrderIndex]
-            );
+            await connection.execute('UPDATE items SET order_index = order_index - 1 WHERE user_id = ? AND order_index > ? AND order_index <= ?', [userId, currentOrderIndex, newOrderIndex]);
         } else if (newOrderIndex < currentOrderIndex) {
-            await connection.execute(
-                'UPDATE items SET order_index = order_index + 1 WHERE user_id = ? AND order_index >= ? AND order_index < ?',
-                [userId, newOrderIndex, currentOrderIndex]
-            );
+            await connection.execute('UPDATE items SET order_index = order_index + 1 WHERE user_id = ? AND order_index >= ? AND order_index < ?', [userId, newOrderIndex, currentOrderIndex]);
         }
-        await connection.execute(
-            'UPDATE items SET order_index = ? WHERE id = ? AND user_id = ?',
-            [newOrderIndex, id, userId]
-        );
+        await connection.execute('UPDATE items SET order_index = ? WHERE id = ? AND user_id = ?', [newOrderIndex, id, userId]);
         await connection.end();
         await rebuildOrderIndex(userId);
     } catch (error) {
@@ -575,6 +551,7 @@ async function reorderItem(id, newOrderIndex, userId) {
     }
 }
 
+// Удаление задачи
 async function deleteItem(id, userId) {
     try {
         const connection = await mysql.createConnection(dbConfig);
@@ -589,6 +566,7 @@ async function deleteItem(id, userId) {
     }
 }
 
+// Обновление задачи
 async function updateItem(id, newText, newOrderIndex, userId) {
     try {
         const connection = await mysql.createConnection(dbConfig);
@@ -603,6 +581,7 @@ async function updateItem(id, newText, newOrderIndex, userId) {
     }
 }
 
+// Генерация HTML строк для пользователей (админ-панель)
 async function getUserHtmlRows() {
     try {
         const connection = await mysql.createConnection(dbConfig);
@@ -629,85 +608,54 @@ async function getUserHtmlRows() {
     }
 }
 
+// Перемещение задачи вверх
 const moveUp = async (id, userId) => {
-  await executeWithRetry(async () => {
-    const connection = await pool.getConnection();
-    try {
-      await connection.beginTransaction();
-
-      const [itemRows] = await connection.execute(
-        'SELECT order_index FROM items WHERE id = ? AND user_id = ? FOR UPDATE',
-        [id, userId]
-      );
-      if (!itemRows.length) throw new Error('Item not found');
-      const currentOrderIndex = itemRows[0].order_index;
-
-      const [aboveRows] = await connection.execute(
-        'SELECT id, order_index FROM items WHERE user_id = ? AND order_index < ? ORDER BY order_index DESC LIMIT 1 FOR UPDATE',
-        [userId, currentOrderIndex]
-      );
-      if (!aboveRows.length) throw new Error('No item above to swap with');
-      const aboveItem = aboveRows[0];
-
-      // Fix the "move up" logic by ensuring only the direct neighbor is swapped
-      await connection.execute(
-        'UPDATE items SET order_index = ? WHERE id = ?',
-        [aboveItem.order_index, id]
-      );
-      await connection.execute(
-        'UPDATE items SET order_index = ? WHERE id = ?',
-        [currentOrderIndex, aboveItem.id]
-      );
-
-      await connection.commit();
-    } catch (error) {
-      await connection.rollback();
-      throw error;
-    } finally {
-      connection.release();
-    }
-  });
+    await executeWithRetry(async () => {
+        const connection = await pool.getConnection();
+        try {
+            await connection.beginTransaction();
+            const [itemRows] = await connection.execute('SELECT order_index FROM items WHERE id = ? AND user_id = ? FOR UPDATE', [id, userId]);
+            if (!itemRows.length) throw new Error('Item not found');
+            const currentOrderIndex = itemRows[0].order_index;
+            const [aboveRows] = await connection.execute('SELECT id, order_index FROM items WHERE user_id = ? AND order_index < ? ORDER BY order_index DESC LIMIT 1 FOR UPDATE', [userId, currentOrderIndex]);
+            if (!aboveRows.length) throw new Error('No item above to swap with');
+            const aboveItem = aboveRows[0];
+            await connection.execute('UPDATE items SET order_index = ? WHERE id = ?', [aboveItem.order_index, id]);
+            await connection.execute('UPDATE items SET order_index = ? WHERE id = ?', [currentOrderIndex, aboveItem.id]);
+            await connection.commit();
+        } catch (error) {
+            await connection.rollback();
+            throw error;
+        } finally {
+            connection.release();
+        }
+    });
 };
 
-
+// Перемещение задачи вниз
 const moveDown = async (id, userId) => {
-  await executeWithRetry(async () => {
-    const connection = await pool.getConnection();
-    try {
-      await connection.beginTransaction();
-
-      const [itemRows] = await connection.execute(
-        'SELECT order_index FROM items WHERE id = ? AND user_id = ? FOR UPDATE',
-        [id, userId]
-      );
-      if (!itemRows.length) throw new Error('Item not found');
-      const currentOrderIndex = itemRows[0].order_index;
-
-      const [belowRows] = await connection.execute(
-        'SELECT id, order_index FROM items WHERE user_id = ? AND order_index > ? ORDER BY order_index ASC LIMIT 1 FOR UPDATE',
-        [userId, currentOrderIndex]
-      );
-      if (!belowRows.length) throw new Error('No item below to swap with');
-      const belowItem = belowRows[0];
-
-      await connection.execute(
-        'UPDATE items SET order_index = ? WHERE id = ?',
-        [belowItem.order_index, id]
-      );
-      await connection.execute(
-        'UPDATE items SET order_index = ? WHERE id = ?',
-        [currentOrderIndex, belowItem.id]
-      );
-
-      await connection.commit();
-    } catch (error) {
-      await connection.rollback();
-      throw error;
-    } finally {
-      connection.release();
-    }
-  });
+    await executeWithRetry(async () => {
+        const connection = await pool.getConnection();
+        try {
+            await connection.beginTransaction();
+            const [itemRows] = await connection.execute('SELECT order_index FROM items WHERE id = ? AND user_id = ? FOR UPDATE', [id, userId]);
+            if (!itemRows.length) throw new Error('Item not found');
+            const currentOrderIndex = itemRows[0].order_index;
+            const [belowRows] = await connection.execute('SELECT id, order_index FROM items WHERE user_id = ? AND order_index > ? ORDER BY order_index ASC LIMIT 1 FOR UPDATE', [userId, currentOrderIndex]);
+            if (!belowRows.length) throw new Error('No item below to swap with');
+            const belowItem = belowRows[0];
+            await connection.execute('UPDATE items SET order_index = ? WHERE id = ?', [belowItem.order_index, id]);
+            await connection.execute('UPDATE items SET order_index = ? WHERE id = ?', [currentOrderIndex, belowItem.id]);
+            await connection.commit();
+        } catch (error) {
+            await connection.rollback();
+            throw error;
+        } finally {
+            connection.release();
+        }
+    });
 };
 
+// Запуск сервера
 const server = http.createServer(handleRequest);
 server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
