@@ -17,8 +17,9 @@ const session = cookieSession({
     name: 'session',
     keys: ['my_secret_key'],
     maxAge: 24 * 60 * 60 * 1000,
+    secure: process.env.NODE_ENV === 'production', // Включает secure в продакшене
+    sameSite: 'lax' // Защита от CSRF
 });
-
 function isAuthenticated(req) {
     return req.session && req.session.userId;
 }
