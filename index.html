@@ -398,5 +398,18 @@ async function reorderItem(id, newOrderIndex) {
             }
         });
     });
+          function logout() {
+        fetch('/logout', { 
+            method: 'POST',
+            credentials: 'include' // Для отправки cookie
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                window.location.href = '/login';
+            }
+        })
+        .catch(error => console.error('Ошибка:', error));
+    }
     </script>
 </html>
