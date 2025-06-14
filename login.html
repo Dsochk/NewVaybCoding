@@ -83,36 +83,6 @@
             user-select: none;
         }
     </style>
-    <script>
-          function handleLogin(event) {
-            event.preventDefault(); // Предотвращаем стандартную отправку формы
-            const login = document.getElementById('login').value;
-            const password = document.getElementById('password').value;
-
-            // Отправляем запрос на сервер
-            fetch('/login', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ login, password })
-            })
-            .then(response => response.json()) // Парсим JSON-ответ
-            .then(data => {
-                if (data.success) {
-                    // При успешной авторизации перенаправляем на главную страницу
-                    window.location.href = '/';
-                } else {
-                    // При ошибке показываем сообщение
-                    alert(data.error || 'Ошибка авторизации');
-                }
-            })
-            .catch(error => {
-                console.error('Ошибка:', error);
-                alert('Произошла ошибка при авторизации');
-            });
-        }
-    </script>
 </head>
 <body>
     <div class="login-container">
@@ -143,7 +113,23 @@
         togglePassword.addEventListener('mouseleave', () => {
             passwordInput.type = 'password';
         });
+        async function login() {
+    const login = document.getElementById('login').value;
+    const password = document.getElementById('password').value;
 
+    const response = await fetch('https://your-app.onrender.com/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ login, password }),
+        credentials: 'include' // Важно для передачи куки
+    });
+
+    if (response.ok) {
+        window.location.href = '/';
+    } else {
+        alert('Ошибка входа');
+    }
+}
         document.getElementById('login-form').addEventListener('submit', async (e) => {
             e.preventDefault();
             const login = document.getElementById('login-input').value;
