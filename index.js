@@ -226,7 +226,6 @@ async function handleRequest(req, res) {
                 res.writeHead(403, { 'Content-Type': 'text/plain' });
                 res.end('Доступ запрещен');
             }
-        } else tracing remaining routes...
         } else if (req.method === 'POST' && req.url === '/addUser') {
             if (!isAuthenticated(req) || req.session.role !== 'admin') {
                 res.writeHead(403, { 'Content-Type': 'text/plain' });
