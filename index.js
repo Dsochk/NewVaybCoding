@@ -15,7 +15,7 @@ const dbConfig = {
 const pool = mysql.createPool(dbConfig);
 
 // Настройка сессий с поддержкой HTTPS в продакшене
-const session = cookieSession({
+const sessionMiddleware = cookieSession({
     name: 'session',
     keys: [process.env.SESSION_KEY || 'my_secret_key'],
     maxAge: 24 * 60 * 60 * 1000, // 24 часа
@@ -134,10 +134,37 @@ async function rebuildOrderIndex(userId) {
     }
 }
 
+// Генерация HTML строк для пользователей (админ-панель)
+async function getUserHtmlRows() {
+    try {
+        const connection = await mysql.createConnection(dbConfig);
+        const [rows] = await connection.execute('SELECT id, login, password, role FROM users ORDER BY id');
+        await connection.end();
+        return rows.map(user => `
+            <tr>
+                <td>${user.id}</td>
+                <td>${user.login}</td>
+                <td class="password-cell">
+                    <input type="password" value="${user.password}" disabled>
+                    <button class="show-password-btn">👁️</button>
+                </td>
+                <td>${user.role === 'admin' ? 'Да' : 'Нет'}</td>
+                <td>
+                    <button class="edit-btn" data-id="${user.id}">Edit</button>
+                    <button class="delete-btn" data-id="${user.id}">Delete</button>
+                </td>
+            </tr>
+        `).join('');
+    } catch (error) {
+        console.error('Error retrieving users:', error);
+        throw error;
+    }
+}
+
 // Обработчик запросов
 async function handleRequest(req, res) {
-console.log('Incoming cookies:', req.headers.cookie);
-    session(req, res, async () => {
+    console.log('Incoming cookies:', req.headers.cookie);
+    sessionMiddleware(req, res, async () => {
         console.log(`Request URL: ${req.url}, Method: ${req.method}`);
         if (req.url === '/login' && req.method === 'GET') {
             try {
@@ -151,7 +178,6 @@ console.log('Incoming cookies:', req.headers.cookie);
         } else if (req.url === '/login' && req.method === 'POST') {
             let body = '';
             req.on('data', chunk => { body += chunk; });
-            console.log('Set-Cookie header:', res.getHeader('Set-Cookie'));
             req.on('end', async () => {
                 try {
                     const { login, password } = JSON.parse(body);
@@ -161,12 +187,12 @@ console.log('Incoming cookies:', req.headers.cookie);
                         const token = crypto.randomBytes(32).toString('hex');
                         await connection.execute('UPDATE users SET token = ? WHERE id = ?', [token, rows[0].id]);
                         console.log(`Logged in user: ${login}, id: ${rows[0].id}, role: ${rows[0].role}`);
-                        console.log('Session before setting:', req.session);
                         req.session.userId = rows[0].id;
                         req.session.role = rows[0].role;
                         console.log('Session after setting:', req.session);
                         await connection.end();
                         res.writeHead(200, { 'Content-Type': 'application/json' });
+                        console.log('Set-Cookie header:', res.getHeader('Set-Cookie'));
                         res.end(JSON.stringify({ success: true, token: token }));
                     } else {
                         await connection.end();
@@ -174,6 +200,7 @@ console.log('Incoming cookies:', req.headers.cookie);
                         res.end(JSON.stringify({ success: false, error: 'Неверный логин или пароль' }));
                     }
                 } catch (error) {
+                    console.error('Ошибка:', error);
                     res.writeHead(500, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify({ success: false, error: 'Ошибка сервера' }));
                 }
@@ -189,17 +216,11 @@ console.log('Incoming cookies:', req.headers.cookie);
             if (isAuthenticated(req)) {
                 try {
                     const userRole = req.session.role || 'user';
-                    let adminButtonHtml = '';
-                    if (userRole === 'admin') {
-                        adminButtonHtml = '<button onclick="window.location.href=\'/admin.html\'">Go to Admin Panel</button>';
-                    }
+                    let adminButtonHtml = userRole === 'admin' ? '<button onclick="window.location.href=\'/admin.html\'">Go to Admin Panel</button>' : '';
                     const html = await fs.promises.readFile(path.join(__dirname, 'index.html'), 'utf8');
-                    if (!html) {
-                        throw new Error('HTML content is empty');
-                    }
-                    const processedHtml = html.replace('{{adminButton}}', adminButtonHtml || '')
-                                              .replace('{{userRole}}', userRole)
-                                              .replace('{{rows}}', await getHtmlRows(req.session.userId));
+                    const processedHtml = html.replace('{{adminButton}}', adminButtonHtml)
+                                             .replace('{{userRole}}', userRole)
+                                             .replace('{{rows}}', await getHtmlRows(req.session.userId));
                     res.writeHead(200, { 'Content-Type': 'text/html' });
                     res.end(processedHtml);
                 } catch (err) {
@@ -549,7 +570,7 @@ async function reorderItem(id, newOrderIndex, userId) {
         if (newOrderIndex > currentOrderIndex) {
             await connection.execute('UPDATE items SET order_index = order_index - 1 WHERE user_id = ? AND order_index > ? AND order_index <= ?', [userId, currentOrderIndex, newOrderIndex]);
         } else if (newOrderIndex < currentOrderIndex) {
-            await connection.execute('UPDATE items SET order_index = order_index + 1 WHERE user_id = ? AND order_index >= ? AND order_index < ?', [userId, newOrderIndex, currentOrderIndex]);
+            await connection.execute('UPDATE items SET order_index = order_index + 1 WHERE user_id = ? AND order_index >= tillegg ? AND order_index < ?', [userId, newOrderIndex, currentOrderIndex]);
         }
         await connection.execute('UPDATE items SET order_index = ? WHERE id = ? AND user_id = ?', [newOrderIndex, id, userId]);
         await connection.end();
@@ -586,33 +607,6 @@ async function updateItem(id, newText, newOrderIndex, userId) {
         return result;
     } catch (error) {
         console.error('Error updating item:', error);
-        throw error;
-    }
-}
-
-// Генерация HTML строк для пользователей (админ-панель)
-async function getUserHtmlRows() {
-    try {
-        const connection = await mysql.createConnection(dbConfig);
-        const [rows] = await connection.execute('SELECT id, login, password, role FROM users ORDER BY id');
-        await connection.end();
-        return rows.map(user => `
-            <tr>
-                <td>${user.id}</td>
-                <td>${user.login}</td>
-                <td class="password-cell">
-                    <input type="password" value="${user.password}" disabled>
-                    <button class="show-password-btn">👁️</button>
-                </td>
-                <td>${user.role === 'admin' ? 'Да' : 'Нет'}</td>
-                <td>
-                    <button class="edit-btn" data-id="${user.id}">Edit</button>
-                    <button class="delete-btn" data-id="${user.id}">Delete</button>
-                </td>
-            </tr>
-        `).join('');
-    } catch (error) {
-        console.error('Error retrieving users:', error);
         throw error;
     }
 }
