@@ -24,7 +24,7 @@ const sessionMiddleware = cookieSession({
     httpOnly: true // Защита от XSS-атак
 });
 
-app.use(sessionMiddleware);
+//app.use(sessionMiddleware);
 
 // Проверка аутентификации через сессию
 function isAuthenticated(req) {
