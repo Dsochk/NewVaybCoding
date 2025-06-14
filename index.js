@@ -4,6 +4,7 @@ const path = require('path');
 const mysql = require('mysql2/promise');
 const cookieSession = require('cookie-session');
 const crypto = require('crypto');
+const winston = require('winston');
 const PORT = process.env.PORT || 3000;
 
 const dbConfig = {
@@ -14,12 +15,22 @@ const dbConfig = {
 };
 const pool = mysql.createPool(dbConfig);
 
-// Настройка сессий с поддержкой HTTPS в продакшене
+// Настройка логирования
+const logger = winston.createLogger({
+    level: 'info',
+    format: winston.format.json(),
+    transports: [
+        new winston.transports.File({ filename: 'error.log', level: 'error' }),
+        new winston.transports.File({ filename: 'combined.log' }),
+    ],
+});
+
+// Настройка сессий с поддержкой HTTPS
 const session = cookieSession({
     name: 'session',
     keys: [process.env.SESSION_KEY || 'my_secret_key'],
     maxAge: 24 * 60 * 60 * 1000, // 24 часа
-    secure: process.env.NODE_ENV === 'production', // Secure для HTTPS
+    secure: true, // Для HTTPS на render.com
     sameSite: 'lax', // Защита от CSRF
     httpOnly: true // Защита от XSS
 });
@@ -43,7 +54,7 @@ async function isAuthenticatedOrToken(req) {
             await connection.end();
             return rows.length > 0;
         } catch (error) {
-            console.error('Ошибка при проверке токена:', error);
+            logger.error('Ошибка при проверке токена:', error);
             return false;
         }
     }
@@ -57,7 +68,7 @@ async function executeWithRetry(operation, maxRetries = 3) {
             return await operation();
         } catch (error) {
             if (error.code === 'ER_LOCK_DEADLOCK' && attempt < maxRetries) {
-                console.warn(`Дедлок на попытке ${attempt}, повторяем...`);
+                logger.warn(`Дедлок на попытке ${attempt}, повторяем...`);
                 await new Promise(resolve => setTimeout(resolve, 100 * attempt));
                 continue;
             }
@@ -71,7 +82,7 @@ async function retrieveListItems(userId) {
     if (!userId) {
         throw new Error('userId is required');
     }
-    console.log(`Retrieving items for userId: ${userId}`);
+    logger.info(`Retrieving items for userId: ${userId}`);
     const connection = await mysql.createConnection(dbConfig);
     const query = 'SELECT id, text, order_index FROM items WHERE user_id = ? ORDER BY order_index';
     const [rows] = await connection.execute(query, [userId]);
@@ -125,7 +136,7 @@ async function rebuildOrderIndex(userId) {
             await connection.execute('UPDATE items SET order_index = ? WHERE id = ?', [i + 1, items[i].id]);
         }
     } catch (error) {
-        console.error('Error rebuilding order index:', error);
+        logger.error('Error rebuilding order index:', error);
         throw error;
     } finally {
         if (connection) await connection.end();
@@ -141,6 +152,7 @@ async function handleRequest(req, res) {
                 res.writeHead(200, { 'Content-Type': 'text/html' });
                 res.end(html);
             } catch (err) {
+                logger.error('Error loading login.html:', err);
                 res.writeHead(500, { 'Content-Type': 'text/plain' });
                 res.end('Error loading login.html');
             }
@@ -155,7 +167,7 @@ async function handleRequest(req, res) {
                     if (rows.length > 0) {
                         const token = crypto.randomBytes(32).toString('hex');
                         await connection.execute('UPDATE users SET token = ? WHERE id = ?', [token, rows[0].id]);
-                        console.log(`Logged in user: ${login}, id: ${rows[0].id}, role: ${rows[0].role}`);
+                        logger.info(`Logged in user: ${login}, id: ${rows[0].id}, role: ${rows[0].role}`);
                         req.session.userId = rows[0].id;
                         req.session.role = rows[0].role;
                         await connection.end();
@@ -167,18 +179,26 @@ async function handleRequest(req, res) {
                         res.end(JSON.stringify({ success: false, error: 'Неверный логин или пароль' }));
                     }
                 } catch (error) {
+                    logger.error('Error in /login POST:', error);
                     res.writeHead(500, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify({ success: false, error: 'Ошибка сервера' }));
                 }
             });
         } else if (req.url === '/' && req.method === 'GET') {
             if (!req.session) {
-                console.error('Session not initialized');
+                logger.error('Session not initialized');
                 res.writeHead(500, { 'Content-Type': 'text/plain' });
                 res.end('Session error');
                 return;
             }
             if (isAuthenticated(req)) {
+                if (!req.session.userId) {
+                    logger.error('User ID is missing in session');
+                    res.writeHead(500, { 'Content-Type': 'text/plain' });
+                    res.end('Session error');
+                    return;
+                }
+                logger.info(`Rendering page for userId: ${req.session.userId}, role: ${req.session.role}`);
                 try {
                     const userRole = req.session.role || 'user';
                     let adminButtonHtml = '';
@@ -195,7 +215,7 @@ async function handleRequest(req, res) {
                     res.writeHead(200, { 'Content-Type': 'text/html' });
                     res.end(processedHtml);
                 } catch (err) {
-                    console.error('Error in route /:', err.message);
+                    logger.error('Error in route /:', err.message);
                     res.writeHead(500, { 'Content-Type': 'text/plain' });
                     res.end('Error loading index.html: ' + err.message);
                 }
@@ -212,6 +232,7 @@ async function handleRequest(req, res) {
                     res.writeHead(200, { 'Content-Type': 'text/html' });
                     res.end(processedHtml);
                 } catch (err) {
+                    logger.error('Error loading admin.html:', err);
                     res.writeHead(500, { 'Content-Type': 'text/plain' });
                     res.end('Ошибка загрузки admin.html');
                 }
@@ -244,6 +265,7 @@ async function handleRequest(req, res) {
                     res.writeHead(200, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify({ success: true }));
                 } catch (error) {
+                    logger.error('Error in /addUser:', error);
                     res.writeHead(400, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify({ success: false, error: error.message }));
                 }
@@ -266,6 +288,7 @@ async function handleRequest(req, res) {
                     res.writeHead(200, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify({ success: true }));
                 } catch (error) {
+                    logger.error('Error in /deleteUser:', error);
                     res.writeHead(400, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify({ success: false, error: error.message }));
                 }
@@ -295,6 +318,7 @@ async function handleRequest(req, res) {
                     res.writeHead(200, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify({ success: true }));
                 } catch (error) {
+                    logger.error('Error in /editUser:', error);
                     res.writeHead(400, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify({ success: false, error: error.message }));
                 }
@@ -322,6 +346,7 @@ async function handleRequest(req, res) {
                         res.end(JSON.stringify({ success: false, error: 'Пользователь не найден' }));
                     }
                 } catch (error) {
+                    logger.error('Error in /getPassword:', error);
                     res.writeHead(400, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify({ success: false, error: error.message }));
                 }
@@ -343,6 +368,7 @@ async function handleRequest(req, res) {
                     res.writeHead(200, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify({ success: true, id: newItemId }));
                 } catch (error) {
+                    logger.error('Error in /add:', error);
                     res.writeHead(400, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify({ success: false, error: error.message }));
                 }
@@ -364,6 +390,7 @@ async function handleRequest(req, res) {
                     res.writeHead(200, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify({ success: true }));
                 } catch (error) {
+                    logger.error('Error in /delete:', error);
                     res.writeHead(400, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify({ success: false, error: error.message }));
                 }
@@ -389,7 +416,7 @@ async function handleRequest(req, res) {
                     res.end(JSON.stringify({ success: false, error: 'Задача не найдена' }));
                 }
             } catch (error) {
-                console.error('Ошибка:', error);
+                logger.error('Error in /getItem:', error);
                 res.writeHead(500, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ success: false, error: 'Ошибка сервера' }));
             }
@@ -410,6 +437,7 @@ async function handleRequest(req, res) {
                     res.writeHead(200, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify({ success: true }));
                 } catch (error) {
+                    logger.error('Error in /edit:', error);
                     res.writeHead(400, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify({ success: false, error: error.message }));
                 }
@@ -431,6 +459,7 @@ async function handleRequest(req, res) {
                     res.writeHead(200, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify({ success: true }));
                 } catch (error) {
+                    logger.error('Error in /reorder:', error);
                     res.writeHead(400, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify({ success: false, error: error.message }));
                 }
@@ -457,7 +486,7 @@ async function handleRequest(req, res) {
                     }
                     await connection.end();
                 } catch (error) {
-                    console.error('Ошибка:', error);
+                    logger.error('Error in /api/items:', error);
                     res.writeHead(500, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify({ success: false, error: 'Error retrieving items' }));
                 }
@@ -482,6 +511,7 @@ async function handleRequest(req, res) {
                     res.writeHead(200, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify({ success: true }));
                 } catch (error) {
+                    logger.error('Error in /moveUp:', error);
                     res.writeHead(400, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify({ success: false, error: error.message }));
                 }
@@ -503,6 +533,7 @@ async function handleRequest(req, res) {
                     res.writeHead(200, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify({ success: true }));
                 } catch (error) {
+                    logger.error('Error in /moveDown:', error);
                     res.writeHead(400, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify({ success: false, error: error.message }));
                 }
@@ -524,7 +555,7 @@ async function addItem(text, userId) {
         await rebuildOrderIndex(userId);
         return result.insertId;
     } catch (error) {
-        console.error('Error adding item:', error);
+        logger.error('Error adding item:', error);
         throw error;
     }
 }
@@ -546,7 +577,7 @@ async function reorderItem(id, newOrderIndex, userId) {
         await connection.end();
         await rebuildOrderIndex(userId);
     } catch (error) {
-        console.error('Error reordering item:', error);
+        logger.error('Error reordering item:', error);
         throw error;
     }
 }
@@ -561,7 +592,7 @@ async function deleteItem(id, userId) {
         await rebuildOrderIndex(userId);
         return result;
     } catch (error) {
-        console.error('Error deleting item:', error);
+        logger.error('Error deleting item:', error);
         throw error;
     }
 }
@@ -576,7 +607,7 @@ async function updateItem(id, newText, newOrderIndex, userId) {
         await rebuildOrderIndex(userId);
         return result;
     } catch (error) {
-        console.error('Error updating item:', error);
+        logger.error('Error updating item:', error);
         throw error;
     }
 }
@@ -603,7 +634,7 @@ async function getUserHtmlRows() {
             </tr>
         `).join('');
     } catch (error) {
-        console.error('Error retrieving users:', error);
+        logger.error('Error retrieving users:', error);
         throw error;
     }
 }
@@ -658,4 +689,4 @@ const moveDown = async (id, userId) => {
 
 // Запуск сервера
 const server = http.createServer(handleRequest);
-server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+server.listen(PORT, () => logger.info(`Server running on port ${PORT}`));
