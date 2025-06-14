@@ -136,10 +136,11 @@
             const password = document.getElementById('password-input').value;
             try {
                 const response = await fetch('/login', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ login, password })
-                });
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ login: 'user', password: 'pass' }),
+    credentials: 'include' // Важно для отправки и получения куки
+});
                 const result = await response.json();
                 if (result.success) {
                     window.location.href = '/';
