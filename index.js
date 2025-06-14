@@ -166,73 +166,75 @@ async function handleRequest(req, res) {
     console.log('Incoming cookies:', req.headers.cookie);
     sessionMiddleware(req, res, async () => {
         console.log(`Request URL: ${req.url}, Method: ${req.method}`);
-        if (req.url === '/login' && req.method === 'GET') {
+        if (req.url === '/login' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => { body += chunk; });
+        req.on('end', async () => {
             try {
-                const html = await fs.promises.readFile(path.join(__dirname, 'login.html'), 'utf8');
-                res.writeHead(200, { 'Content-Type': 'text/html' });
-                res.end(html);
+                const { login, password } = JSON.parse(body);
+                const connection = await mysql.createConnection(dbConfig);
+                const [rows] = await connection.execute('SELECT id, role FROM users WHERE login = ? AND password = ?', [login, password]);
+                if (rows.length > 0) {
+                    const token = crypto.randomBytes(32).toString('hex');
+                    await connection.execute('UPDATE users SET token = ? WHERE id = ?', [token, rows[0].id]);
+                    console.log(`Logged in user: ${login}, id: ${rows[0].id}, role: ${rows[0].role}`);
+                    console.log('Session before setting:', req.session);
+                    req.session.userId = rows[0].id;
+                    req.session.role = rows[0].role;
+                    console.log('Session after setting:', req.session);
+                    await connection.end();
+
+                    // Устанавливаем заголовки и отправляем ответ
+                    res.setHeader('Content-Type', 'application/json');
+                    res.statusCode = 200;
+                    res.end(JSON.stringify({ success: true, token: token }));
+                } else {
+                    await connection.end();
+                    res.statusCode = 401;
+                    res.setHeader('Content-Type', 'application/json');
+                    res.end(JSON.stringify({ success: false, error: 'Неверный логин или пароль' }));
+                }
+            } catch (error) {
+                console.error('Ошибка:', error);
+                res.statusCode = 500;
+                res.setHeader('Content-Type', 'application/json');
+                res.end(JSON.stringify({ success: false, error: 'Ошибка сервера' }));
+            } finally {
+                console.log('Set-Cookie header:', res.getHeader('Set-Cookie'));
+            }
+        });
+    } else if (req.url === '/' && req.method === 'GET') {
+        console.log('Checking session for /');
+        if (!req.session) {
+            console.error('Session not initialized');
+            res.statusCode = 500;
+            res.setHeader('Content-Type', 'text/plain');
+            res.end('Session error');
+            return;
+        }
+        if (isAuthenticated(req)) {
+            try {
+                const userRole = req.session.role || 'user';
+                let adminButtonHtml = userRole === 'admin' ? '<button onclick="window.location.href=\'/admin.html\'">Go to Admin Panel</button>' : '';
+                const html = await fs.promises.readFile(path.join(__dirname, 'index.html'), 'utf8');
+                const processedHtml = html.replace('{{adminButton}}', adminButtonHtml)
+                                         .replace('{{userRole}}', userRole)
+                                         .replace('{{rows}}', await getHtmlRows(req.session.userId));
+                res.statusCode = 200;
+                res.setHeader('Content-Type', 'text/html');
+                res.end(processedHtml);
             } catch (err) {
-                res.writeHead(500, { 'Content-Type': 'text/plain' });
-                res.end('Error loading login.html');
+                console.error('Error in route /:', err.message);
+                res.statusCode = 500;
+                res.setHeader('Content-Type', 'text/plain');
+                res.end('Error loading index.html: ' + err.message);
             }
-        } else if (req.url === '/login' && req.method === 'POST') {
-            let body = '';
-            req.on('data', chunk => { body += chunk; });
-            req.on('end', async () => {
-                try {
-                    const { login, password } = JSON.parse(body);
-                    const connection = await mysql.createConnection(dbConfig);
-                    const [rows] = await connection.execute('SELECT id, role FROM users WHERE login = ? AND password = ?', [login, password]);
-                    if (rows.length > 0) {
-                        const token = crypto.randomBytes(32).toString('hex');
-                        await connection.execute('UPDATE users SET token = ? WHERE id = ?', [token, rows[0].id]);
-                        console.log(`Logged in user: ${login}, id: ${rows[0].id}, role: ${rows[0].role}`);
-                        req.session.userId = rows[0].id;
-                        req.session.role = rows[0].role;
-                        console.log('Session after setting:', req.session);
-                        await connection.end();
-                        res.writeHead(200, { 'Content-Type': 'application/json' });
-                        console.log('Set-Cookie header:', res.getHeader('Set-Cookie'));
-                        res.end(JSON.stringify({ success: true, token: token }));
-                    } else {
-                        await connection.end();
-                        res.writeHead(401, { 'Content-Type': 'application/json' });
-                        res.end(JSON.stringify({ success: false, error: 'Неверный логин или пароль' }));
-                    }
-                } catch (error) {
-                    console.error('Ошибка:', error);
-                    res.writeHead(500, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify({ success: false, error: 'Ошибка сервера' }));
-                }
-            });
-        } else if (req.url === '/' && req.method === 'GET') {
-            console.log('Checking session for /');
-            if (!req.session) {
-                console.error('Session not initialized');
-                res.writeHead(500, { 'Content-Type': 'text/plain' });
-                res.end('Session error');
-                return;
-            }
-            if (isAuthenticated(req)) {
-                try {
-                    const userRole = req.session.role || 'user';
-                    let adminButtonHtml = userRole === 'admin' ? '<button onclick="window.location.href=\'/admin.html\'">Go to Admin Panel</button>' : '';
-                    const html = await fs.promises.readFile(path.join(__dirname, 'index.html'), 'utf8');
-                    const processedHtml = html.replace('{{adminButton}}', adminButtonHtml)
-                                             .replace('{{userRole}}', userRole)
-                                             .replace('{{rows}}', await getHtmlRows(req.session.userId));
-                    res.writeHead(200, { 'Content-Type': 'text/html' });
-                    res.end(processedHtml);
-                } catch (err) {
-                    console.error('Error in route /:', err.message);
-                    res.writeHead(500, { 'Content-Type': 'text/plain' });
-                    res.end('Error loading index.html: ' + err.message);
-                }
-            } else {
-                console.log('Redirecting to /login');
-                res.writeHead(302, { 'Location': '/login' });
-                res.end();
-            }
+        } else {
+            console.log('Redirecting to /login');
+            res.statusCode = 302;
+            res.setHeader('Location', '/login');
+            res.end();
+        }
         } else if (req.url === '/admin.html' && req.method === 'GET') {
             if (isAuthenticated(req) && req.session.role === 'admin') {
                 try {
