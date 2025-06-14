@@ -140,6 +140,7 @@ async function handleRequest(req, res) {
         if (req.url === '/login' && req.method === 'GET') {
             try {
                 const html = await fs.promises.readFile(path.join(__dirname, 'login.html'), 'utf8');
+                console.log(`Logged in user: ${login}, id: ${rows[0].id}, role: ${rows[0].role}`);
                 res.writeHead(200, { 'Content-Type': 'text/html' });
                 res.end(html);
             } catch (err) {
