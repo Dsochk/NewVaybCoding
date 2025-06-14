@@ -136,6 +136,7 @@ async function rebuildOrderIndex(userId) {
 
 // Обработчик запросов
 async function handleRequest(req, res) {
+console.log('Incoming cookies:', req.headers.cookie);
     session(req, res, async () => {
         console.log(`Request URL: ${req.url}, Method: ${req.method}`);
         if (req.url === '/login' && req.method === 'GET') {
@@ -150,6 +151,7 @@ async function handleRequest(req, res) {
         } else if (req.url === '/login' && req.method === 'POST') {
             let body = '';
             req.on('data', chunk => { body += chunk; });
+            console.log('Set-Cookie header:', res.getHeader('Set-Cookie'));
             req.on('end', async () => {
                 try {
                     const { login, password } = JSON.parse(body);
