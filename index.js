@@ -1,5 +1,5 @@
 const http = require('http');
-const fs = require('fs').promises;
+const fs = require('fs').promises; // Используем промисы для асинхронного чтения файлов
 const path = require('path');
 const mysql = require('mysql2/promise');
 const cookieSession = require('cookie-session');
@@ -169,7 +169,7 @@ async function handleRequest(req, res) {
 
     // Обслуживание статических файлов
     if (req.url.match(/\.(html|js|css)$/)) {
-        const filePath = path.join(__dirname, 'public', req.url);
+        const filePath = path.join(__dirname, req.url);
         try {
             const file = await fs.readFile(filePath);
             const contentType = {
@@ -222,31 +222,27 @@ async function handleRequest(req, res) {
         if (isAuthenticated(req)) {
             try {
                 const userRole = req.session.role || 'user';
-                const adminButtonHtml = userRole === 'admin'
-                    ? '<button onclick="window.location.href=\'/admin.html\'">Go to Admin Panel</button>'
-                    : '';
-                const html = await fs.readFile(path.join(__dirname, 'public', 'index.html'), 'utf8');
-                const processedHtml = html
-                    .replace('{{adminButton}}', adminButtonHtml)
-                    .replace('{{userRole}}', userRole)
-                    .replace('{{rows}}', await getHtmlRows(req.session.userId));
+                let adminButtonHtml = userRole === 'admin' ? '<button onclick="window.location.href=\'/admin.html\'">Go to Admin Panel</button>' : '';
+                const html = await fs.readFile(path.join(__dirname, 'index.html'), 'utf8');
+                const processedHtml = html.replace('{{adminButton}}', adminButtonHtml)
+                                        .replace('{{userRole}}', userRole)
+                                        .replace('{{rows}}', await getHtmlRows(req.session.userId));
                 res.writeHead(200, { 'Content-Type': 'text/html' });
                 res.end(processedHtml);
             } catch (err) {
-                console.error('Error in route /:', err.message);
                 res.writeHead(500, { 'Content-Type': 'text/plain' });
-                res.end('Error loading index.html: ' + err.message);
+                res.end('Ошибка загрузки index.html');
             }
         } else {
-            console.log('Redirecting to /login.html');
             res.writeHead(302, { 'Location': '/login.html' });
             res.end();
         }
     } else if (req.url === '/admin.html' && req.method === 'GET') {
         if (isAuthenticated(req) && req.session.role === 'admin') {
             try {
-                const html = await fs.readFile(path.join(__dirname, 'public', 'admin.html'), 'utf8');
-                const processedHtml = html.replace('{{userRows}}', await getUserHtmlRows());
+                const html = await fs.readFile(path.join(__dirname, 'admin.html'), 'utf8');
+                const userRows = await getUserHtmlRows();
+                const processedHtml = html.replace('{{userRows}}', userRows);
                 res.writeHead(200, { 'Content-Type': 'text/html' });
                 res.end(processedHtml);
             } catch (err) {
@@ -257,6 +253,109 @@ async function handleRequest(req, res) {
             res.writeHead(403, { 'Content-Type': 'text/plain' });
             res.end('Доступ запрещен');
         }
+    } else if (req.method === 'POST' && req.url === '/addUser') {
+        if (!isAuthenticated(req) || req.session.role !== 'admin') {
+            res.writeHead(403, { 'Content-Type': 'text/plain' });
+            res.end('Доступ запрещен');
+            return;
+        }
+        let body = '';
+        req.on('data', chunk => { body += chunk; });
+        req.on('end', async () => {
+            try {
+                const { login, password, isAdmin } = JSON.parse(body);
+                if (!login || !password) throw new Error('Логин и пароль обязательны');
+                const role = isAdmin === 'on' ? 'admin' : 'user';
+                const is_admin = role === 'admin' ? 1 : 0;
+                const connection = await mysql.createConnection(dbConfig);
+                await connection.execute(
+                    'INSERT INTO users (login, password, is_admin, role) VALUES (?, ?, ?, ?)',
+                    [login, password, is_admin, role]
+                );
+                await connection.end();
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: true }));
+            } catch (error) {
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: false, error: error.message }));
+            }
+        });
+    } else if (req.method === 'POST' && req.url === '/deleteUser') {
+        if (!isAuthenticated(req) || req.session.role !== 'admin') {
+            res.writeHead(403, { 'Content-Type': 'text/plain' });
+            res.end('Доступ запрещен');
+            return;
+        }
+        let body = '';
+        req.on('data', chunk => { body += chunk; });
+        req.on('end', async () => {
+            try {
+                const { id } = JSON.parse(body);
+                if (!id) throw new Error('ID пользователя обязателен');
+                const connection = await mysql.createConnection(dbConfig);
+                await connection.execute('DELETE FROM users WHERE id = ?', [id]);
+                await connection.end();
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: true }));
+            } catch (error) {
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: false, error: error.message }));
+            }
+        });
+    } else if (req.method === 'POST' && req.url === '/editUser') {
+        if (!isAuthenticated(req) || req.session.role !== 'admin') {
+            res.writeHead(403, { 'Content-Type': 'text/plain' });
+            res.end('Доступ запрещен');
+            return;
+        }
+        let body = '';
+        req.on('data', chunk => { body += chunk; });
+        req.on('end', async () => {
+            try {
+                const { id, login, password, isAdmin } = JSON.parse(body);
+                if (!id || !login || !password) throw new Error('ID, логин и пароль обязательны');
+                const role = isAdmin === 'on' ? 'admin' : 'user';
+                const is_admin = role === 'admin' ? 1 : 0;
+                const connection = await mysql.createConnection(dbConfig);
+                await connection.execute(
+                    'UPDATE users SET login = ?, password = ?, is_admin = ?, role = ? WHERE id = ?',
+                    [login, password, is_admin, role, id]
+                );
+                await connection.end();
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: true }));
+            } catch (error) {
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: false, error: error.message }));
+            }
+        });
+    } else if (req.method === 'POST' && req.url === '/getPassword') {
+        if (!isAuthenticated(req) || req.session.role !== 'admin') {
+            res.writeHead(403, { 'Content-Type': 'text/plain' });
+            res.end('Доступ запрещен');
+            return;
+        }
+        let body = '';
+        req.on('data', chunk => { body += chunk; });
+        req.on('end', async () => {
+            try {
+                const { id } = JSON.parse(body);
+                if (!id) throw new Error('ID пользователя обязателен');
+                const connection = await mysql.createConnection(dbConfig);
+                const [rows] = await connection.execute('SELECT password FROM users WHERE id = ?', [id]);
+                await connection.end();
+                if (rows.length > 0) {
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ success: true, password: rows[0].password }));
+                } else {
+                    res.writeHead(404, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ success: false, error: 'Пользователь не найден' }));
+                }
+            } catch (error) {
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: false, error: error.message }));
+            }
+        });
     } else if (req.method === 'POST' && req.url === '/add') {
         if (!(await isAuthenticatedOrToken(req))) {
             res.writeHead(401, { 'Content-Type': 'text/plain' });
@@ -268,7 +367,7 @@ async function handleRequest(req, res) {
         req.on('end', async () => {
             try {
                 const { text } = JSON.parse(body);
-                if (!text) throw new Error('Текст не передан');
+                if (!text) throw new Error("Текст не передан");
                 const userId = await getUserIdFromRequest(req);
                 const newItemId = await addItem(text, userId);
                 res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -289,7 +388,7 @@ async function handleRequest(req, res) {
         req.on('end', async () => {
             try {
                 const { id } = JSON.parse(body);
-                if (!id) throw new Error('ID не передан');
+                if (!id) throw new Error("ID не передан");
                 const userId = await getUserIdFromRequest(req);
                 await deleteItem(id, userId);
                 res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -299,6 +398,31 @@ async function handleRequest(req, res) {
                 res.end(JSON.stringify({ success: false, error: error.message }));
             }
         });
+    } else if (req.url.startsWith('/getItem') && req.method === 'GET') {
+        if (!isAuthenticated(req)) {
+            res.writeHead(401, { 'Content-Type': 'text/plain' });
+            res.end('Unauthorized');
+            return;
+        }
+        const urlParams = new URLSearchParams(req.url.split('?')[1]);
+        const id = urlParams.get('id');
+        try {
+            const userId = req.session.userId;
+            const connection = await mysql.createConnection(dbConfig);
+            const [rows] = await connection.execute('SELECT text, order_index FROM items WHERE id = ? AND user_id = ?', [id, userId]);
+            await connection.end();
+            if (rows.length > 0) {
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: true, item: rows[0] }));
+            } else {
+                res.writeHead(404, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: false, error: 'Задача не найдена' }));
+            }
+        } catch (error) {
+            console.error('Ошибка:', error);
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, error: 'Ошибка сервера' }));
+        }
     } else if (req.method === 'POST' && req.url === '/edit') {
         if (!isAuthenticated(req)) {
             res.writeHead(401, { 'Content-Type': 'text/plain' });
@@ -310,7 +434,7 @@ async function handleRequest(req, res) {
         req.on('end', async () => {
             try {
                 const { id, text, orderIndex } = JSON.parse(body);
-                if (!id || !text || orderIndex === undefined) throw new Error('ID, текст или порядок не переданы');
+                if (!id || !text || orderIndex === undefined) throw new Error("ID, текст или порядок не переданы");
                 const userId = await getUserIdFromRequest(req);
                 await updateItem(id, text, orderIndex, userId);
                 res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -331,7 +455,7 @@ async function handleRequest(req, res) {
         req.on('end', async () => {
             try {
                 const { id, newOrderIndex } = JSON.parse(body);
-                if (!id || newOrderIndex === undefined) throw new Error('ID или новый порядок не переданы');
+                if (!id || newOrderIndex === undefined) throw new Error("ID или новый порядок не переданы");
                 const userId = await getUserIdFromRequest(req);
                 await reorderItem(id, newOrderIndex, userId);
                 res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -345,6 +469,74 @@ async function handleRequest(req, res) {
         req.session = null;
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ success: true }));
+    } else if (req.url === '/api/items' && req.method === 'GET') {
+        const authHeader = req.headers['authorization'];
+        if (authHeader && authHeader.startsWith('Bearer ')) {
+            const token = authHeader.substring(7);
+            try {
+                const connection = await mysql.createConnection(dbConfig);
+                const [rows] = await connection.execute('SELECT id FROM users WHERE token = ?', [token]);
+                if (rows.length > 0) {
+                    const userId = rows[0].id;
+                    const items = await retrieveListItems(userId);
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify(items));
+                } else {
+                    res.writeHead(401, { 'Content-Type': 'text/plain' });
+                    res.end('Unauthorized');
+                }
+                await connection.end();
+            } catch (error) {
+                console.error('Ошибка:', error);
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: false, error: 'Error retrieving items' }));
+            }
+        } else {
+            res.writeHead(401, { 'Content-Type': 'text/plain' });
+            res.end('Unauthorized');
+        }
+    } else if (req.method === 'POST' && req.url === '/moveUp') {
+        if (!(await isAuthenticatedOrToken(req))) {
+            res.writeHead(401, { 'Content-Type': 'text/plain' });
+            res.end('Unauthorized');
+            return;
+        }
+        let body = '';
+        req.on('data', chunk => { body += chunk; });
+        req.on('end', async () => {
+            try {
+                const { id } = JSON.parse(body);
+                if (!id) throw new Error("ID не передан");
+                const userId = await getUserIdFromRequest(req);
+                await moveUp(id, userId);
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: true }));
+            } catch (error) {
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: false, error: error.message }));
+            }
+        });
+    } else if (req.method === 'POST' && req.url === '/moveDown') {
+        if (!(await isAuthenticatedOrToken(req))) {
+            res.writeHead(401, { 'Content-Type': 'text/plain' });
+            res.end('Unauthorized');
+            return;
+        }
+        let body = '';
+        req.on('data', chunk => { body += chunk; });
+        req.on('end', async () => {
+            try {
+                const { id } = JSON.parse(body);
+                if (!id) throw new Error("ID не передан");
+                const userId = await getUserIdFromRequest(req);
+                await moveDown(id, userId);
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: true }));
+            } catch (error) {
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: false, error: error.message }));
+            }
+        });
     } else {
         res.writeHead(404, { 'Content-Type': 'text/plain' });
         res.end('Route not found');
@@ -353,68 +545,118 @@ async function handleRequest(req, res) {
 
 // Добавление задачи
 async function addItem(text, userId) {
-    const connection = await mysql.createConnection(dbConfig);
-    const [result] = await connection.execute(
-        'INSERT INTO items (text, user_id, order_index) VALUES (?, ?, ?)',
-        [text, userId, 0]
-    );
-    await connection.end();
-    await rebuildOrderIndex(userId);
-    return result.insertId;
-}
-
-// Удаление задачи
-async function deleteItem(id, userId) {
-    const connection = await mysql.createConnection(dbConfig);
-    const [result] = await connection.execute(
-        'DELETE FROM items WHERE id = ? AND user_id = ?',
-        [id, userId]
-    );
-    await connection.end();
-    await rebuildOrderIndex(userId);
-    return result;
-}
-
-// Обновление задачи
-async function updateItem(id, newText, newOrderIndex, userId) {
-    const connection = await mysql.createConnection(dbConfig);
-    const [result] = await connection.execute(
-        'UPDATE items SET text = ?, order_index = ? WHERE id = ? AND user_id = ?',
-        [newText, newOrderIndex, id, userId]
-    );
-    await connection.end();
-    await rebuildOrderIndex(userId);
-    return result;
+    try {
+        const connection = await mysql.createConnection(dbConfig);
+        const query = 'INSERT INTO items (text, user_id, order_index) VALUES (?, ?, ?)';
+        const [result] = await connection.execute(query, [text, userId, 0]);
+        await connection.end();
+        await rebuildOrderIndex(userId);
+        return result.insertId;
+    } catch (error) {
+        console.error('Error adding item:', error);
+        throw error;
+    }
 }
 
 // Изменение порядка задач
 async function reorderItem(id, newOrderIndex, userId) {
-    const connection = await mysql.createConnection(dbConfig);
-    const [currentItem] = await connection.execute(
-        'SELECT order_index FROM items WHERE id = ? AND user_id = ?',
-        [id, userId]
-    );
-    if (currentItem.length === 0) throw new Error('Задача не найдена');
-    const currentOrderIndex = currentItem[0].order_index;
+    try {
+        const connection = await mysql.createConnection(dbConfig);
+        const [currentItem] = await connection.execute('SELECT order_index FROM items WHERE id = ? AND user_id = ?', [id, userId]);
+        if (currentItem.length === 0) throw new Error('Задача не найдена');
+        const currentOrderIndex = currentItem[0].order_index;
 
-    if (newOrderIndex > currentOrderIndex) {
-        await connection.execute(
-            'UPDATE items SET order_index = order_index - 1 WHERE user_id = ? AND order_index > ? AND order_index <= ?',
-            [userId, currentOrderIndex, newOrderIndex]
-        );
-    } else if (newOrderIndex < currentOrderIndex) {
-        await connection.execute(
-            'UPDATE items SET order_index = order_index + 1 WHERE user_id = ? AND order_index >= ? AND order_index < ?',
-            [userId, newOrderIndex, currentOrderIndex]
-        );
+        if (newOrderIndex > currentOrderIndex) {
+            await connection.execute('UPDATE items SET order_index = order_index - 1 WHERE user_id = ? AND order_index > ? AND order_index <= ?', [userId, currentOrderIndex, newOrderIndex]);
+        } else if (newOrderIndex < currentOrderIndex) {
+            await connection.execute('UPDATE items SET order_index = order_index + 1 WHERE user_id = ? AND order_index >= ? AND order_index < ?', [userId, newOrderIndex, currentOrderIndex]);
+        }
+        await connection.execute('UPDATE items SET order_index = ? WHERE id = ? AND user_id = ?', [newOrderIndex, id, userId]);
+        await connection.end();
+        await rebuildOrderIndex(userId);
+    } catch (error) {
+        console.error('Error reordering item:', error);
+        throw error;
     }
-    await connection.execute(
-        'UPDATE items SET order_index = ? WHERE id = ? AND user_id = ?',
-        [newOrderIndex, id, userId]
-    );
-    await connection.end();
-    await rebuildOrderIndex(userId);
 }
+
+// Удаление задачи
+async function deleteItem(id, userId) {
+    try {
+        const connection = await mysql.createConnection(dbConfig);
+        const query = 'DELETE FROM items WHERE id = ? AND user_id = ?';
+        const [result] = await connection.execute(query, [id, userId]);
+        await connection.end();
+        await rebuildOrderIndex(userId);
+        return result;
+    } catch (error) {
+        console.error('Error deleting item:', error);
+        throw error;
+    }
+}
+
+// Обновление задачи
+async function updateItem(id, newText, newOrderIndex, userId) {
+    try {
+        const connection = await mysql.createConnection(dbConfig);
+        const query = 'UPDATE items SET text = ?, order_index = ? WHERE id = ? AND user_id = ?';
+        const [result] = await connection.execute(query, [newText, newOrderIndex, id, userId]);
+        await connection.end();
+        await rebuildOrderIndex(userId);
+        return result;
+    } catch (error) {
+        console.error('Error updating item:', error);
+        throw error;
+    }
+}
+
+// Перемещение задачи вверх
+const moveUp = async (id, userId) => {
+    await executeWithRetry(async () => {
+        const connection = await pool.getConnection();
+        try {
+            await connection.beginTransaction();
+            const [itemRows] = await connection.execute('SELECT order_index FROM items WHERE id = ? AND user_id = ? FOR UPDATE', [id, userId]);
+            if (!itemRows.length) throw new Error('Item not found');
+            const currentOrderIndex = itemRows[0].order_index;
+            const [aboveRows] = await connection.execute('SELECT id, order_index FROM items WHERE user_id = ? AND order_index < ? ORDER BY order_index DESC LIMIT 1 FOR UPDATE', [userId, currentOrderIndex]);
+            if (!aboveRows.length) throw new Error('No item above to swap with');
+            const aboveItem = aboveRows[0];
+            await connection.execute('UPDATE items SET order_index = ? WHERE id = ?', [aboveItem.order_index, id]);
+            await connection.execute('UPDATE items SET order_index = ? WHERE id = ?', [currentOrderIndex, aboveItem.id]);
+            await connection.commit();
+        } catch (error) {
+            await connection.rollback();
+            throw error;
+        } finally {
+            connection.release();
+        }
+    });
+};
+
+// Перемещение задачи вниз
+const moveDown = async (id, userId) => {
+    await executeWithRetry(async () => {
+        const connection = await pool.getConnection();
+        try {
+            await connection.beginTransaction();
+            const [itemRows] = await connection.execute('SELECT order_index FROM items WHERE id = ? AND user_id = ? FOR UPDATE', [id, userId]);
+            if (!itemRows.length) throw new Error('Item not found');
+            const currentOrderIndex = itemRows[0].order_index;
+            const [belowRows] = await connection.execute('SELECT id, order_index FROM items WHERE user_id = ? AND order_index > ? ORDER BY order_index ASC LIMIT 1 FOR UPDATE', [userId, currentOrderIndex]);
+            if (!belowRows.length) throw new Error('No item below to swap with');
+            const belowItem = belowRows[0];
+            await connection.execute('UPDATE items SET order_index = ? WHERE id = ?', [belowItem.order_index, id]);
+            await connection.execute('UPDATE items SET order_index = ? WHERE id = ?', [currentOrderIndex, belowItem.id]);
+            await connection.commit();
+        } catch (error) {
+            await connection.rollback();
+            throw error;
+        } finally {
+            connection.release();
+        }
+    });
+};
 
 // Запуск сервера
 const server = http.createServer(handleRequest);
