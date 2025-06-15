@@ -87,7 +87,7 @@
 <body>
     <div class="login-container">
         <h1>Login</h1>
-        <form id="loginForm">
+        <form id="login-form">
             <input type="text" id="login-input" placeholder="Login" required>
             <div class="password-wrapper">
                 <input type="password" id="password-input" placeholder="Password" required>
@@ -98,53 +98,60 @@
         <div class="error" id="error-message"></div>
     </div>
     <script>
-        document.getElementById('loginForm').addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const login = document.getElementById('login').value;
-        const password = document.getElementById('password').value;
-        try {
-            const response = await fetch('/login', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ login, password })
-            });
-            const data = await response.json();
-            if (data.success) {
-                window.location.href = '/';
-            } else {
-                alert(data.error || 'Ошибка входа');
-            }
-        } catch (err) {
-            alert('Ошибка сервера');
-        }
-    });
-      function togglePassword() {
-            const password = document.getElementById('password');
-            password.type = password.type === 'password' ? 'text' : 'password';
-        }
+        const passwordInput = document.getElementById('password-input');
+        const togglePassword = document.querySelector('.toggle-password');
 
-        function login() {
-            const login = document.getElementById('login').value;
-            const password = document.getElementById('password').value;
-            fetch('/login', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ login, password }),
-                credentials: 'include' // Для отправки и получения куки
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
+        togglePassword.addEventListener('mousedown', () => {
+            passwordInput.type = 'text';
+        });
+
+        togglePassword.addEventListener('mouseup', () => {
+            passwordInput.type = 'password';
+        });
+
+        // Также обрабатываем случай, если пользователь убирает курсор с значка
+        togglePassword.addEventListener('mouseleave', () => {
+            passwordInput.type = 'password';
+        });
+        async function login() {
+    const login = document.getElementById('login').value;
+    const password = document.getElementById('password').value;
+
+    const response = await fetch('https://your-app.onrender.com/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ login, password }),
+        credentials: 'include' // Важно для передачи куки
+    });
+
+    if (response.ok) {
+        window.location.href = '/';
+    } else {
+        alert('Ошибка входа');
+    }
+}
+        document.getElementById('login-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const login = document.getElementById('login-input').value;
+            const password = document.getElementById('password-input').value;
+            try {
+                const response = await fetch('/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ login: 'user', password: 'pass' }),
+    credentials: 'include' // Важно для отправки и получения куки
+});
+                const result = await response.json();
+                if (result.success) {
                     window.location.href = '/';
                 } else {
-                    alert(data.error || 'Ошибка входа');
+                    document.getElementById('error-message').textContent = 'Неверный логин или пароль';
                 }
-            })
-            .catch(error => {
+            } catch (error) {
                 console.error('Ошибка:', error);
-                alert('Произошла ошибка при входе');
-            });
-        }
+                document.getElementById('error-message').textContent = 'Ошибка при авторизации';
+            }
+        });
     </script>
-</body>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'9501f75edd5a9fbe',t:'MTc0OTk4OTQ0Ny4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
