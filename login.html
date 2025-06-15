@@ -118,7 +118,7 @@
             alert('Ошибка сервера');
         }
     });
-       function togglePassword() {
+      function togglePassword() {
             const password = document.getElementById('password');
             password.type = password.type === 'password' ? 'text' : 'password';
         }
@@ -130,7 +130,7 @@
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ login, password }),
-                credentials: 'include'
+                credentials: 'include' // Для отправки и получения куки
             })
             .then(response => response.json())
             .then(data => {
@@ -140,7 +140,10 @@
                     alert(data.error || 'Ошибка входа');
                 }
             })
-            .catch(error => console.error('Ошибка:', error));
+            .catch(error => {
+                console.error('Ошибка:', error);
+                alert('Произошла ошибка при входе');
+            });
         }
     </script>
 </body>
