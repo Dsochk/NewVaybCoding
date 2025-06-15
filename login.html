@@ -98,21 +98,21 @@
         <div class="error" id="error-message"></div>
     </div>
     <script>
-        const passwordInput = document.getElementById('password-input');
-        const togglePassword = document.querySelector('.toggle-password');
+       // const passwordInput = document.getElementById('password-input');
+        //const togglePassword = document.querySelector('.toggle-password');
 
-        togglePassword.addEventListener('mousedown', () => {
-            passwordInput.type = 'text';
-        });
+     //   togglePassword.addEventListener('mousedown', () => {
+      //      passwordInput.type = 'text';
+      //  });
 
-        togglePassword.addEventListener('mouseup', () => {
-            passwordInput.type = 'password';
-        });
+       // togglePassword.addEventListener('mouseup', () => {
+        //    passwordInput.type = 'password';
+        //});
 
         // Также обрабатываем случай, если пользователь убирает курсор с значка
-        togglePassword.addEventListener('mouseleave', () => {
-            passwordInput.type = 'password';
-        });
+        //togglePassword.addEventListener('mouseleave', () => {
+        //    passwordInput.type = 'password';
+        //});
         async function login() {
     const login = document.getElementById('login').value;
     const password = document.getElementById('password').value;
@@ -130,26 +130,29 @@
         alert('Ошибка входа');
     }
 }
-        document.getElementById('login-form').addEventListener('submit', async (e) => {
+  function togglePassword() {
+            const password = document.getElementById('password');
+            password.type = password.type === 'password' ? 'text' : 'password';
+        }
+            document.getElementById('loginForm').addEventListener('submit', async (e) => {
             e.preventDefault();
-            const login = document.getElementById('login-input').value;
-            const password = document.getElementById('password-input').value;
+            const login = document.getElementById('login').value;
+            const password = document.getElementById('password').value;
             try {
                 const response = await fetch('/login', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ login: 'user', password: 'pass' }),
-    credentials: 'include' // Важно для отправки и получения куки
-});
-                const result = await response.json();
-                if (result.success) {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ login, password }),
+                    credentials: 'include'
+                });
+                const data = await response.json();
+                if (data.success) {
                     window.location.href = '/';
                 } else {
-                    document.getElementById('error-message').textContent = 'Неверный логин или пароль';
+                    alert(data.error || 'Неверный логин или пароль');
                 }
-            } catch (error) {
-                console.error('Ошибка:', error);
-                document.getElementById('error-message').textContent = 'Ошибка при авторизации';
+            } catch (err) {
+                alert('Ошибка сервера');
             }
         });
     </script>
