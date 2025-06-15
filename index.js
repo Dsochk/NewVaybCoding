@@ -154,7 +154,9 @@ async function handleRequest(req, res) {
             req.on('data', chunk => { body += chunk; });
             req.on('end', async () => {
                 try {
+                    console.log('Получен POST-запрос на /login, тело запроса:', body);
                     const { login, password } = JSON.parse(body);
+                                console.log('Попытка входа с login:', login, 'password:', password);
                     const connection = await mysql.createConnection(dbConfig);
                     const [rows] = await connection.execute('SELECT id, role FROM users WHERE login = ? AND password = ?', [login, password]);
                     if (rows.length > 0) {
