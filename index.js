@@ -168,8 +168,33 @@ async function getUserHtmlRows() {
 // Обработчик запросов
 async function handleRequest(req, res) {
     console.log('Входящие cookies:', req.headers.cookie);
-    sessionMiddleware(req, res, () => {}); // Применяем middleware сессий
+    await new Promise((resolve, reject) => {
+        session(req, res, (err) => {
+            if (err) reject(err);
+            else resolve();
+        });
+    });
+    // Обработка статических файлов
+    if (req.url.match(/\.(html|js|css)$/)) {
+        const filePath = path.join(__dirname, req.url);
+        try {
+            const file = await fs.promises.readFile(filePath);
+            const contentType = {
+                '.html': 'text/html',
+                '.js': 'application/javascript',
+                '.css': 'text/css'
+            }[path.extname(filePath)] || 'application/octet-stream';
+            res.writeHead(200, { 'Content-Type': contentType });
+            res.end(file);
+        } catch (err) {
+            res.writeHead(404, { 'Content-Type': 'text/plain' });
+            res.end('File not found');
+        }
+        return;
+    }
 
+    // Существующие маршруты
+    console.log(`Request URL: ${req.url}, Method: ${req.method}`);
     if (req.url === '/login' && req.method === 'POST') {
         let body = '';
         req.on('data', chunk => body += chunk);
